@@ -95,9 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Pincode Search</title>
+    <title>Advanced Pincode Search with Map</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         .card {
             transition: transform 0.2s;
@@ -118,13 +119,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         .loading {
             display: none;
         }
+        #map {
+            height: 300px;
+            width: 100%;
+            border-radius: 8px;
+            margin-top: 20px;
+            z-index: 1;
+        }
+        .map-container {
+            position: relative;
+        }
+        .map-placeholder {
+            height: 300px;
+            background-color: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            margin-top: 20px;
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
     <div class="container py-5">
         <div class="row justify-content-center">
-            <div class="col-lg-8">
-                <h1 class="text-center mb-4"><i class="bi bi-geo-alt-fill"></i> India Pincode Search</h1>
+            <div class="col-lg-10">
+                <h1 class="text-center mb-4"><i class="bi bi-geo-alt-fill"></i> India Pincode Search with Map</h1>
 
                 <div class="search-box mb-4">
                     <div class="row g-3">
@@ -157,9 +178,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
 
                 <div id="results" class="mb-4"></div>
+                
+                <div class="map-container">
+                    <div id="map"></div>
+                    <div id="map-placeholder" class="map-placeholder">
+                        <div class="text-center">
+                            <i class="bi bi-map" style="font-size: 2rem;"></i>
+                            <p class="mt-2">Map will appear here when location data is available</p>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="text-muted text-center small">
-                    <p>Data sourced from India Post Pincode Directory</p>
+                    <p>Data sourced from India Post Pincode Directory | Map by OpenStreetMap</p>
                 </div>
             </div>
         </div>
@@ -167,7 +198,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
+        // Initialize map variable
+        let map;
+        let marker;
+        
         $(document).ready(function() {
             loadStates();
 
@@ -292,6 +328,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         if (response.error) return showError(response.error);
                         if (!response.details) return showError("No details found for this office");
                         displayResults(response.details);
+                        
+                        // Initialize or update map if coordinates exist
+                        if (response.details.latitude && response.details.longitude) {
+                            initMap(response.details.latitude, response.details.longitude, response.details.officename);
+                        } else {
+                            hideMap();
+                        }
                     },
                     error: function(xhr, status, error) {
                         showError("Failed to load details: " + error);
@@ -330,8 +373,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 `);
             }
 
+            function initMap(lat, lng, title) {
+                // Hide placeholder and show map
+                $('#map-placeholder').hide();
+                $('#map').show();
+                
+                if (!map) {
+                    // Initialize map if not already done
+                    map = L.map('map').setView([lat, lng], 15);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    }).addTo(map);
+                } else {
+                    // Update existing map view
+                    map.setView([lat, lng], 15);
+                }
+                
+                // Remove existing marker if any
+                if (marker) {
+                    map.removeLayer(marker);
+                }
+                
+                // Add new marker
+                marker = L.marker([lat, lng]).addTo(map)
+                    .bindPopup(title)
+                    .openPopup();
+            }
+            
+            function hideMap() {
+                $('#map').hide();
+                $('#map-placeholder').show();
+                if (map) {
+                    map.off();
+                    map.remove();
+                    map = null;
+                }
+            }
+
             function resetResults() {
                 $('#results').html('');
+                hideMap();
             }
 
             function showLoading(show) {
@@ -344,6 +425,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <i class="bi bi-exclamation-triangle-fill"></i> ${message}
                     </div>
                 `);
+                hideMap();
             }
         });
     </script>
