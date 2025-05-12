@@ -1,6 +1,6 @@
 # 🇮🇳 India Pincode Database Setup Guide
 
-This guide helps you set up a MySQL database and import Indian pincode data using the `index.php` script already placed in your project.
+This guide helps you set up a MySQL database and import Indian pincode data using the `upload.php` script already placed in your project.
 
 ---
 
