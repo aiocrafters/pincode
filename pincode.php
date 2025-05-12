@@ -75,6 +75,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 }
                 break;
 
+            case 'get_nearby_pincodes':
+                if (!isset($_POST['state'])) throw new Exception("State parameter missing");
+                if (!isset($_POST['district'])) throw new Exception("District parameter missing");
+                
+                $state = $conn->real_escape_string(trim($_POST['state']));
+                $district = $conn->real_escape_string(trim($_POST['district']));
+                
+                $sql = "SELECT officename, pincode, statename, district 
+                        FROM pincodes 
+                        WHERE UPPER(statename) = UPPER('$state') 
+                        AND UPPER(district) = UPPER('$district')
+                        ORDER BY officename";
+                
+                $result = $conn->query($sql);
+                if (!$result) throw new Exception("Failed to fetch nearby pincodes");
+                $response['nearby_pincodes'] = $result->fetch_all(MYSQLI_ASSOC);
+                break;
+
             default:
                 throw new Exception("Invalid action");
         }
@@ -149,6 +167,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             padding-top: 20px;
             border-top: 1px solid #eee;
         }
+        #nearby-pincodes {
+            margin-top: 30px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+        .office-link {
+            color: #0d6efd;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .office-link:hover {
+            text-decoration: underline;
+        }
+        .table-responsive {
+            max-height: 400px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
@@ -196,6 +231,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <i class="bi bi-map" style="font-size: 2rem;"></i>
                             <p class="mt-2">Map will appear here when location data is available</p>
                         </div>
+                    </div>
+                </div>
+
+                <div id="nearby-pincodes" class="mt-4" style="display: none;">
+                    <h4 class="mb-3">Nearby Pincodes in this District</h4>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-primary">
+                                <tr>
+                                    <th>Post Office Name</th>
+                                    <th>Pincode</th>
+                                    <th>State</th>
+                                    <th>District</th>
+                                </tr>
+                            </thead>
+                            <tbody id="nearby-pincodes-body">
+                                <!-- Table content will be loaded here -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -345,9 +399,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         } else {
                             hideMap();
                         }
+                        
+                        // Load nearby pincodes
+                        loadNearbyPincodes(state, district);
                     },
                     error: function(xhr, status, error) {
                         showError("Failed to load details: " + error);
+                    },
+                    complete: function() {
+                        showLoading(false);
+                    }
+                });
+            }
+
+            function loadNearbyPincodes(state, district) {
+                showLoading(true);
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: { action: 'get_nearby_pincodes', state: state, district: district },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) {
+                            $('#nearby-pincodes').hide();
+                            return;
+                        }
+                        
+                        const $tbody = $('#nearby-pincodes-body').empty();
+                        
+                        if (response.nearby_pincodes && response.nearby_pincodes.length > 0) {
+                            response.nearby_pincodes.forEach(office => {
+                                $tbody.append(`
+                                    <tr>
+                                        <td>
+                                            <a href="javascript:void(0)" class="office-link" 
+                                               data-state="${office.statename}" 
+                                               data-district="${office.district}" 
+                                               data-office="${office.officename}">
+                                                ${office.officename}
+                                            </a>
+                                        </td>
+                                        <td>${office.pincode || 'N/A'}</td>
+                                        <td>${office.statename || 'N/A'}</td>
+                                        <td>${office.district || 'N/A'}</td>
+                                    </tr>
+                                `);
+                            });
+                            $('#nearby-pincodes').show();
+                        } else {
+                            $('#nearby-pincodes').hide();
+                        }
+                    },
+                    error: function() {
+                        $('#nearby-pincodes').hide();
                     },
                     complete: function() {
                         showLoading(false);
@@ -388,15 +492,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                 </div>
                             </div>
 
-                         <!-- SEO Content Section -->
-                        <section class="seo-section">
-                            <h1>Pincode <strong>${details.pincode || 'N/A'}</strong> - ${details.district || 'N/A'}, ${details.statename || 'N/A'} | Postal Details</h1>
-                            <br> <br>
-                            <h2>The Pincode of ${details.officename || 'N/A'} is <strong>${details.pincode || 'N/A'}</strong></h2>
-                            <p>The pincode <strong>${details.pincode || 'N/A'}</strong> serves areas in <strong>${details.district || 'N/A'}</strong>, located in <strong>${details.statename || 'N/A'}</strong>. It is part of the <strong>${details.circlename || 'N/A'}</strong> postal circle, within the <strong>${details.regionname || 'N/A'}</strong> region, and managed by the <strong>${details.divisionname || 'N/A'}</strong> division. The pincode supports <strong>${details.delivery || 'N/A'}</strong> delivery services for fast mail and parcel delivery.</p>
-                        </section>
+                            <!-- SEO Content Section -->
+                            <section class="seo-section">
+                                <h1>Pincode <strong>${details.pincode || 'N/A'}</strong> - ${details.district || 'N/A'}, ${details.statename || 'N/A'} | Postal Details</h1>
+                                <br> <br>
+                                <h2>The Pincode of ${details.officename || 'N/A'} is <strong>${details.pincode || 'N/A'}</strong></h2>
+                                <p>The pincode <strong>${details.pincode || 'N/A'}</strong> serves areas in <strong>${details.district || 'N/A'}</strong>, located in <strong>${details.statename || 'N/A'}</strong>. It is part of the <strong>${details.circlename || 'N/A'}</strong> postal circle, within the <strong>${details.regionname || 'N/A'}</strong> region, and managed by the <strong>${details.divisionname || 'N/A'}</strong> division. The pincode supports <strong>${details.delivery || 'N/A'}</strong> delivery services for fast mail and parcel delivery.</p>
+                            </section>
 
-                    
                             <section class="seo-section">
                                 <h2>Frequently Asked Questions (FAQs)</h2>
                                 <div class="accordion" id="faqAccordion">
@@ -482,6 +585,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             function resetResults() {
                 $('#results').html('');
+                $('#nearby-pincodes').hide();
                 hideMap();
                 // Reset title and meta description
                 document.title = 'India Pincode Search with Map | Find Postal Codes';
@@ -499,7 +603,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </div>
                 `);
                 hideMap();
+                $('#nearby-pincodes').hide();
             }
+        });
+
+        // Event delegation for clickable office names
+        $(document).on('click', '.office-link', function() {
+            const state = $(this).data('state');
+            const district = $(this).data('district');
+            const office = $(this).data('office');
+            
+            // Set the dropdown values
+            $('#state').val(state);
+            $('#district').val(district);
+            $('#officename').val(office);
+            
+            // Trigger the change event to load details
+            loadDetails(state, district, office);
+            
+            // Scroll to results section
+            $('html, body').animate({
+                scrollTop: $('#results').offset().top - 20
+            }, 500);
         });
     </script>
 </body>
