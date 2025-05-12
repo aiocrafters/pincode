@@ -1,314 +1,350 @@
 <?php
+// Database configuration
+define('DB_HOST', 'localhost');
+define('DB_USER', 'root');
+define('DB_PASS', '');
+define('DB_NAME', 'india_pincode');
+
+// Enable error reporting for development
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// API Endpoint
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $host = "localhost";
-    $username = "root";
-    $password = "";
-    $dbname = "india_pincode";
+    header('Content-Type: application/json');
 
-    $conn = new mysqli($host, $username, $password, $dbname);
-    if ($conn->connect_error) {
-        error_log("Connection failed: " . $conn->connect_error);
-        echo '<option value="">Database connection error</option>';
-        exit;
-    }
+    try {
+        $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+        if ($conn->connect_error) {
+            throw new Exception("Database connection failed: " . $conn->connect_error);
+        }
 
-    $action = $_POST['action'];
+        $action = $_POST['action'];
+        $response = [];
 
-    if ($action === 'get_districts' && isset($_POST['state'])) {
-        $state = $conn->real_escape_string(trim($_POST['state']));
-        $sql = "SELECT DISTINCT district FROM pincodes WHERE UPPER(statename) = UPPER('$state') ORDER BY district";
-        error_log("District query: $sql");
-        $result = $conn->query($sql);
-        if (!$result) {
-            error_log("District query failed: " . $conn->error);
-            echo '<option value="">Error fetching districts</option>';
-            $conn->close();
-            exit;
-        }
-        echo '<option value="">Select District</option>';
-        while ($row = $result->fetch_assoc()) {
-            echo "<option value='" . htmlspecialchars($row['district']) . "'>" . htmlspecialchars($row['district']) . "</option>";
-        }
-        $conn->close();
-        exit;
-    }
+        switch ($action) {
+            case 'get_states':
+                $sql = "SELECT DISTINCT statename FROM pincodes ORDER BY statename";
+                $result = $conn->query($sql);
+                if (!$result) throw new Exception("Failed to fetch states");
+                $response['states'] = $result->fetch_all(MYSQLI_ASSOC);
+                break;
 
-    if ($action === 'get_offices' && isset($_POST['state'], $_POST['district'])) {
-        $state = $conn->real_escape_string(trim($_POST['state']));
-        $district = $conn->real_escape_string(trim($_POST['district']));
-        $sql = "SELECT DISTINCT officename FROM pincodes WHERE UPPER(statename) = UPPER('$state') AND UPPER(district) = UPPER('$district') ORDER BY officename";
-        error_log("Office query: $sql");
-        $result = $conn->query($sql);
-        if (!$result) {
-            error_log("Office query failed: " . $conn->error);
-            echo '<option value="">Error fetching offices</option>';
-            $conn->close();
-            exit;
-        }
-        echo '<option value="">Select Office Name</option>';
-        if ($result->num_rows > 0) {
-            error_log("Found " . $result->num_rows . " offices for State: $state, District: $district");
-            while ($row = $result->fetch_assoc()) {
-                echo "<option value='" . htmlspecialchars($row['officename']) . "'>" . htmlspecialchars($row['officename']) . "</option>";
-            }
-        } else {
-            error_log("No offices found for State: $state, District: $district");
-        }
-        $conn->close();
-        exit;
-    }
+            case 'get_districts':
+                if (!isset($_POST['state'])) throw new Exception("State parameter missing");
+                $state = $conn->real_escape_string(trim($_POST['state']));
+                $sql = "SELECT DISTINCT district FROM pincodes WHERE UPPER(statename) = UPPER('$state') ORDER BY district";
+                $result = $conn->query($sql);
+                if (!$result) throw new Exception("Failed to fetch districts");
+                $response['districts'] = $result->fetch_all(MYSQLI_ASSOC);
+                break;
 
-    if ($action === 'get_details' && isset($_POST['state'], $_POST['district'], $_POST['officename'])) {
-        $state = $conn->real_escape_string(trim($_POST['state']));
-        $district = $conn->real_escape_string(trim($_POST['district']));
-        $officename = $conn->real_escape_string(trim($_POST['officename']));
-        $sql = "SELECT statename, district, officename, pincode, circlename, regionname, divisionname, officetype, delivery, latitude, longitude 
-                FROM pincodes 
-                WHERE UPPER(statename) = UPPER('$state') AND UPPER(district) = UPPER('$district') AND UPPER(officename) = UPPER('$officename')";
-        error_log("Details query: $sql");
-        $result = $conn->query($sql);
-        if (!$result) {
-            error_log("Details query failed: " . $conn->error);
-            $conn->close();
-            exit;
+            case 'get_offices':
+                if (!isset($_POST['state']) || !isset($_POST['district'])) throw new Exception("Missing parameters");
+                $state = $conn->real_escape_string(trim($_POST['state']));
+                $district = $conn->real_escape_string(trim($_POST['district']));
+                $sql = "SELECT DISTINCT officename FROM pincodes 
+                        WHERE UPPER(statename) = UPPER('$state') 
+                        AND UPPER(district) = UPPER('$district') 
+                        ORDER BY officename";
+                $result = $conn->query($sql);
+                if (!$result) throw new Exception("Failed to fetch offices");
+                $response['offices'] = $result->fetch_all(MYSQLI_ASSOC);
+                break;
+
+            case 'get_details':
+                if (!isset($_POST['state']) || !isset($_POST['district']) || !isset($_POST['officename'])) {
+                    throw new Exception("Missing parameters");
+                }
+                $state = $conn->real_escape_string(trim($_POST['state']));
+                $district = $conn->real_escape_string(trim($_POST['district']));
+                $officename = $conn->real_escape_string(trim($_POST['officename']));
+
+                $sql = "SELECT * FROM pincodes 
+                        WHERE UPPER(statename) = UPPER('$state') 
+                        AND UPPER(district) = UPPER('$district') 
+                        AND UPPER(officename) = UPPER('$officename') 
+                        LIMIT 1";
+                $result = $conn->query($sql);
+                if (!$result) throw new Exception("Failed to fetch details");
+
+                if ($result->num_rows > 0) {
+                    $response['details'] = $result->fetch_assoc();
+                } else {
+                    $response['error'] = "No records found";
+                }
+                break;
+
+            default:
+                throw new Exception("Invalid action");
         }
-        while ($row = $result->fetch_assoc()) {
-            echo "<tr>
-                <td>" . htmlspecialchars($row['statename']) . "</td>
-                <td>" . htmlspecialchars($row['district']) . "</td>
-                <td>" . htmlspecialchars($row['officename']) . "</td>
-                <td>" . htmlspecialchars($row['pincode']) . "</td>
-                <td>" . htmlspecialchars($row['circlename']) . "</td>
-                <td>" . htmlspecialchars($row['regionname']) . "</td>
-                <td>" . htmlspecialchars($row['divisionname']) . "</td>
-                <td>" . htmlspecialchars($row['officetype']) . "</td>
-                <td>" . htmlspecialchars($row['delivery']) . "</td>
-                <td>" . ($row['latitude'] ? htmlspecialchars($row['latitude']) : '-') . "</td>
-                <td>" . ($row['longitude'] ? htmlspecialchars($row['longitude']) : '-') . "</td>
-            </tr>";
-        }
-        $conn->close();
+
+        echo json_encode($response);
+
+    } catch (Exception $e) {
+        echo json_encode(['error' => $e->getMessage()]);
+    } finally {
+        if (isset($conn)) $conn->close();
         exit;
     }
 }
 ?>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Pincode Search</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Pincode Search</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
+        .card {
+            transition: transform 0.2s;
         }
-        h2 {
-            color: #333;
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
         }
-        .search-container {
-            margin-bottom: 20px;
+        .search-box {
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        select {
-            padding: 10px;
-            margin: 10px 0;
-            width: 200px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
+        .result-card {
+            border-left: 4px solid #0d6efd;
         }
-        table {
-            width: 100%;
-            max-width: 800px;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        th, td {
-            padding: 10px;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        th {
-            background-color: #4CAF50;
-            color: white;
-        }
-        tr:nth-child(even) {
-            background-color: #f2f2f2;
-        }
-        .error {
-            color: red;
-        }
-        .no-results {
-            color: #555;
-            font-style: italic;
+        .loading {
+            display: none;
         }
     </style>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script>if (typeof jQuery == 'undefined') alert('jQuery not loaded');</script>
 </head>
 <body>
-    <h2>Pincode Search</h2>
-    <div class="search-container">
-        <div>
-            <label for="state">State:</label><br>
-            <select id="state" name="state">
-                <option value="">Select State</option>
-                <?php
-                $host = "localhost";
-                $username = "root";
-                $password = "";
-                $dbname = "india_pincode";
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <h1 class="text-center mb-4"><i class="bi bi-geo-alt-fill"></i> India Pincode Search</h1>
 
-                $conn = new mysqli($host, $username, $password, $dbname);
-                if ($conn->connect_error) {
-                    die("<div class='error'>Connection failed: " . $conn->connect_error . "</div>");
-                }
+                <div class="search-box mb-4">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label for="state" class="form-label">State</label>
+                            <select class="form-select" id="state">
+                                <option value="">Select State</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="district" class="form-label">District</label>
+                            <select class="form-select" id="district" disabled>
+                                <option value="">Select District</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label for="officename" class="form-label">Office Name</label>
+                            <select class="form-select" id="officename" disabled>
+                                <option value="">Select Office</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
 
-                $sql = "SELECT DISTINCT statename FROM pincodes ORDER BY statename";
-                $result = $conn->query($sql);
-                while ($row = $result->fetch_assoc()) {
-                    echo "<option value='" . htmlspecialchars($row['statename']) . "'>" . htmlspecialchars($row['statename']) . "</option>";
-                }
-                $conn->close();
-                ?>
-            </select>
-        </div>
-        <div>
-            <label for="district">District:</label><br>
-            <select id="district" name="district" disabled>
-                <option value="">Select District</option>
-            </select>
-        </div>
-        <div>
-            <label for="officename">Office Name:</label><br>
-            <select id="officename" name="officename" disabled>
-                <option value="">Select Office Name</option>
-            </select>
+                <div id="loading" class="text-center loading mb-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Searching...</p>
+                </div>
+
+                <div id="results" class="mb-4"></div>
+
+                <div class="text-muted text-center small">
+                    <p>Data sourced from India Post Pincode Directory</p>
+                </div>
+            </div>
         </div>
     </div>
 
-    <div id="results">
-        <table id="pincodeTable" style="display: none;">
-            <thead>
-                <tr>
-                    <th>State</th>
-                    <th>District</th>
-                    <th>Office</th>
-                    <th>Pincode</th>
-                    <th>Circle</th>
-                    <th>Region</th>
-                    <th>Division</th>
-                    <th>Office Type</th>
-                    <th>Delivery</th>
-                    <th>Latitude</th>
-                    <th>Longitude</th>
-                </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-        </table>
-        <div id="noResults" class="no-results"></div>
-    </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
         $(document).ready(function() {
+            loadStates();
+
             $('#state').change(function() {
-                var state = $.trim($(this).val());
-                console.log('State changed: ' + state);
+                const state = $(this).val();
                 if (state) {
-                    console.log('Fetching districts for State: ' + state);
-                    $.ajax({
-                        url: 'search.php',
-                        type: 'POST',
-                        data: { state: state, action: 'get_districts' },
-                        success: function(data) {
-                            console.log('Districts received: ' + data);
-                            $('#district').html(data).prop('disabled', false);
-                            $('#officename').html('<option value="">Select Office Name</option>').prop('disabled', true);
-                            $('#pincodeTable').hide();
-                            $('#noResults').text('');
-                        },
-                        error: function(xhr, status, error) {
-                            console.error('AJAX error: ' + error);
-                            console.error('Status: ' + status);
-                            console.error('Response: ' + xhr.responseText);
-                            alert('Error fetching districts.');
-                        }
-                    });
+                    loadDistricts(state);
+                    $('#district').prop('disabled', false).html('<option value="">Loading...</option>');
+                    $('#officename').prop('disabled', true).html('<option value="">Select Office</option>');
+                    resetResults();
                 } else {
-                    console.log('No state selected, resetting districts.');
-                    $('#district').html('<option value="">Select District</option>').prop('disabled', true);
-                    $('#officename').html('<option value="">Select Office Name</option>').prop('disabled', true);
-                    $('#pincodeTable').hide();
-                    $('#noResults').text('');
+                    $('#district, #officename').prop('disabled', true).html('<option value="">Select...</option>');
+                    resetResults();
                 }
             });
 
             $('#district').change(function() {
-                var state = $.trim($('#state').val());
-                var district = $.trim($(this).val());
-                console.log('District changed. State: ' + state + ', District: ' + district);
+                const state = $('#state').val();
+                const district = $(this).val();
                 if (district) {
-                    console.log('Fetching offices for State: ' + state + ', District: ' + district);
-                    $.ajax({
-                        url: 'search.php',
-                        type: 'POST',
-                        data: { state: state, district: district, action: 'get_offices' },
-                        success: function(data) {
-                            console.log('Office Names received: ' + data);
-                            $('#officename').html(data).prop('disabled', false);
-                            if (data.trim() === '<option value="">Select Office Name</option>') {
-                                console.log('No office names returned.');
-                                alert('No office names found for this district.');
-                            }
-                            $('#pincodeTable').hide();
-                            $('#noResults').text('');
-                        },
-                        error: function(xhr, status, error) {
-                            console.error('AJAX error: ' + error);
-                            console.error('Status: ' + status);
-                            console.error('Response: ' + xhr.responseText);
-                            alert('Error fetching office names. Check the console for details.');
-                        }
-                    });
+                    loadOffices(state, district);
+                    $('#officename').prop('disabled', false).html('<option value="">Loading...</option>');
+                    resetResults();
                 } else {
-                    console.log('No district selected, resetting office dropdown.');
-                    $('#officename').html('<option value="">Select Office Name</option>').prop('disabled', true);
-                    $('#pincodeTable').hide();
-                    $('#noResults').text('');
+                    $('#officename').prop('disabled', true).html('<option value="">Select Office</option>');
+                    resetResults();
                 }
             });
 
             $('#officename').change(function() {
-                var state = $.trim($('#state').val());
-                var district = $.trim($('#district').val());
-                var officename = $.trim($(this).val());
-                console.log('Fetching details for State: ' + state + ', District: ' + district + ', Office: ' + officename);
+                const state = $('#state').val();
+                const district = $('#district').val();
+                const officename = $(this).val();
                 if (officename) {
-                    $.ajax({
-                        url: 'search.php',
-                        type: 'POST',
-                        data: { state: state, district: district, officename: officename, action: 'get_details' },
-                        success: function(data) {
-                            console.log('Details received: ' + data);
-                            $('#tableBody').html(data);
-                            if (data.trim()) {
-                                $('#pincodeTable').show();
-                                $('#noResults').text('');
-                            } else {
-                                $('#pincodeTable').hide();
-                                $('#noResults').text('No results found.');
-                            }
-                        },
-                        error: function(xhr, status, error) {
-                            console.error('AJAX error: ' + error);
-                            console.error('Status: ' + status);
-                            console.error('Response: ' + xhr.responseText);
-                            alert('Error fetching details.');
-                        }
-                    });
+                    loadDetails(state, district, officename);
                 } else {
-                    $('#pincodeTable').hide();
-                    $('#noResults').text('');
+                    resetResults();
                 }
             });
+
+            function loadStates() {
+                showLoading(true);
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: { action: 'get_states' },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) return showError(response.error);
+                        const $stateSelect = $('#state').html('<option value="">Select State</option>');
+                        response.states.forEach(state => {
+                            $stateSelect.append(`<option value="${state.statename}">${state.statename}</option>`);
+                        });
+                    },
+                    error: function(xhr, status, error) {
+                        showError("Failed to load states: " + error);
+                    },
+                    complete: function() {
+                        showLoading(false);
+                    }
+                });
+            }
+
+            function loadDistricts(state) {
+                showLoading(true);
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: { action: 'get_districts', state: state },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) return showError(response.error);
+                        const $districtSelect = $('#district').html('<option value="">Select District</option>');
+                        response.districts.forEach(district => {
+                            $districtSelect.append(`<option value="${district.district}">${district.district}</option>`);
+                        });
+                    },
+                    error: function(xhr, status, error) {
+                        showError("Failed to load districts: " + error);
+                    },
+                    complete: function() {
+                        showLoading(false);
+                    }
+                });
+            }
+
+            function loadOffices(state, district) {
+                showLoading(true);
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: { action: 'get_offices', state: state, district: district },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) return showError(response.error);
+                        const $officeSelect = $('#officename').html('<option value="">Select Office</option>');
+                        if (response.offices.length === 0) {
+                            $officeSelect.append('<option value="" disabled>No offices found</option>');
+                        } else {
+                            response.offices.forEach(office => {
+                                $officeSelect.append(`<option value="${office.officename}">${office.officename}</option>`);
+                            });
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        showError("Failed to load offices: " + error);
+                    },
+                    complete: function() {
+                        showLoading(false);
+                    }
+                });
+            }
+
+            function loadDetails(state, district, officename) {
+                showLoading(true);
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: { action: 'get_details', state: state, district: district, officename: officename },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) return showError(response.error);
+                        if (!response.details) return showError("No details found for this office");
+                        displayResults(response.details);
+                    },
+                    error: function(xhr, status, error) {
+                        showError("Failed to load details: " + error);
+                    },
+                    complete: function() {
+                        showLoading(false);
+                    }
+                });
+            }
+
+            function displayResults(details) {
+                $('#results').html(`
+                    <div class="card result-card mb-3">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0">${details.officename || 'N/A'}</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p><strong>Pincode:</strong> ${details.pincode || 'N/A'}</p>
+                                    <p><strong>State:</strong> ${details.statename || 'N/A'}</p>
+                                    <p><strong>District:</strong> ${details.district || 'N/A'}</p>
+                                    <p><strong>Circle:</strong> ${details.circlename || 'N/A'}</p>
+                                    <p><strong>Region:</strong> ${details.regionname || 'N/A'}</p>
+                                </div>
+                                <div class="col-md-6">
+                                    <p><strong>Division:</strong> ${details.divisionname || 'N/A'}</p>
+                                    <p><strong>Office Type:</strong> ${details.officetype || 'N/A'}</p>
+                                    <p><strong>Delivery:</strong> ${details.delivery || 'N/A'}</p>
+                                    <p><strong>Latitude:</strong> ${details.latitude || 'N/A'}</p>
+                                    <p><strong>Longitude:</strong> ${details.longitude || 'N/A'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `);
+            }
+
+            function resetResults() {
+                $('#results').html('');
+            }
+
+            function showLoading(show) {
+                $('#loading').toggle(show);
+            }
+
+            function showError(message) {
+                $('#results').html(`
+                    <div class="alert alert-danger" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill"></i> ${message}
+                    </div>
+                `);
+            }
         });
     </script>
 </body>
