@@ -9,6 +9,28 @@ define('DB_NAME', 'india_pincode');
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+// Helper function to format name for URL
+function formatForUrl($name) {
+    // Convert to lowercase
+    $name = strtolower($name);
+    // Handle postal abbreviations before replacing spaces
+    $name = str_replace([' b.o.', ' s.o.', ' b.o', ' s.o'], ['_bo', '_so', '_bo', '_so'], $name);
+    // Replace special characters with underscores
+    $name = preg_replace('/[\s+.\\/&;:%]+/', '_', $name);
+    return trim($name, '_');
+}
+
+// Helper function to parse URL-formatted name
+function parseUrlName($urlName) {
+    // Replace underscores with spaces
+    $name = str_replace('_', ' ', $urlName);
+    // Handle postal abbreviations
+    $name = str_replace([' bo', ' so'], [' B.O', ' S.O'], $name);
+    // Capitalize words
+    $name = ucwords(strtolower($name));
+    return $name;
+}
+
 // API Endpoint
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -27,7 +49,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $sql = "SELECT DISTINCT statename FROM pincodes ORDER BY statename";
                 $result = $conn->query($sql);
                 if (!$result) throw new Exception("Failed to fetch states");
-                $response['states'] = $result->fetch_all(MYSQLI_ASSOC);
+                $states = $result->fetch_all(MYSQLI_ASSOC);
+                $response['states'] = array_map(function($state) {
+                    return [
+                        'statename' => $state['statename'],
+                        'url_statename' => formatForUrl($state['statename'])
+                    ];
+                }, $states);
                 break;
 
             case 'get_districts':
@@ -36,20 +64,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $sql = "SELECT DISTINCT district FROM pincodes WHERE UPPER(statename) = UPPER('$state') ORDER BY district";
                 $result = $conn->query($sql);
                 if (!$result) throw new Exception("Failed to fetch districts");
-                $response['districts'] = $result->fetch_all(MYSQLI_ASSOC);
+                $districts = $result->fetch_all(MYSQLI_ASSOC);
+                $response['districts'] = array_map(function($district) {
+                    return [
+                        'district' => $district['district'],
+                        'url_district' => formatForUrl($district['district'])
+                    ];
+                }, $districts);
                 break;
 
             case 'get_offices':
                 if (!isset($_POST['state']) || !isset($_POST['district'])) throw new Exception("Missing parameters");
                 $state = $conn->real_escape_string(trim($_POST['state']));
                 $district = $conn->real_escape_string(trim($_POST['district']));
-                $sql = "SELECT DISTINCT officename FROM pincodes 
+                $sql = "SELECT DISTINCT officename, pincode FROM pincodes 
                         WHERE UPPER(statename) = UPPER('$state') 
                         AND UPPER(district) = UPPER('$district') 
                         ORDER BY officename";
                 $result = $conn->query($sql);
                 if (!$result) throw new Exception("Failed to fetch offices");
-                $response['offices'] = $result->fetch_all(MYSQLI_ASSOC);
+                $offices = $result->fetch_all(MYSQLI_ASSOC);
+                $response['offices'] = array_map(function($office) {
+                    return [
+                        'officename' => $office['officename'],
+                        'url_officename' => formatForUrl($office['officename']),
+                        'pincode' => $office['pincode']
+                    ];
+                }, $offices);
                 break;
 
             case 'get_details':
@@ -69,28 +110,99 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if (!$result) throw new Exception("Failed to fetch details");
 
                 if ($result->num_rows > 0) {
-                    $response['details'] = $result->fetch_assoc();
+                    $details = $result->fetch_assoc();
+                    $details['url_statename'] = formatForUrl($details['statename']);
+                    $details['url_district'] = formatForUrl($details['district']);
+                    $details['url_officename'] = formatForUrl($details['officename']);
+                    $response['details'] = $details;
                 } else {
                     $response['error'] = "No records found";
                 }
                 break;
 
-            case 'get_nearby_pincodes':
-                if (!isset($_POST['state'])) throw new Exception("State parameter missing");
-                if (!isset($_POST['district'])) throw new Exception("District parameter missing");
+            case 'parse_url':
+                if (!isset($_POST['url'])) throw new Exception("URL parameter missing");
+                $url = trim($_POST['url']);
+                $parts = explode('-', $url);
+                if (count($parts) !== 4) throw new Exception("Invalid URL format");
+
+                $state = $conn->real_escape_string(parseUrlName($parts[0]));
+                $district = $conn->real_escape_string(parseUrlName($parts[1]));
+                $officename = $conn->real_escape_string(parseUrlName($parts[2]));
+                $pincode = $conn->real_escape_string($parts[3]);
+
+                // More flexible query to handle abbreviations
+                $sql = "SELECT * FROM pincodes 
+                        WHERE UPPER(statename) = UPPER('$state') 
+                        AND UPPER(district) = UPPER('$district')
+                        AND (
+                            UPPER(officename) = UPPER('$officename')
+                            OR UPPER(REPLACE(officename, '.', '')) = UPPER(REPLACE('$officename', '.', ''))
+                            OR UPPER(REPLACE(officename, ' ', '')) = UPPER(REPLACE('$officename', ' ', ''))
+                        )
+                        AND pincode = '$pincode' 
+                        LIMIT 1";
                 
+                error_log("Parsing URL: $url");
+                error_log("Executing query: $sql");
+
+                $result = $conn->query($sql);
+                if (!$result) throw new Exception("Failed to parse URL");
+
+                if ($result->num_rows > 0) {
+                    $details = $result->fetch_assoc();
+                    $details['url_statename'] = formatForUrl($details['statename']);
+                    $details['url_district'] = formatForUrl($details['district']);
+                    $details['url_officename'] = formatForUrl($details['officename']);
+                    $response['details'] = $details;
+                } else {
+                    // Try one more time with more flexible matching
+                    $sql = "SELECT * FROM pincodes 
+                            WHERE UPPER(statename) = UPPER('$state') 
+                            AND UPPER(district) = UPPER('$district')
+                            AND (
+                                UPPER(officename) LIKE UPPER('%".str_replace(' ', '%', $officename)."%')
+                                OR UPPER(REPLACE(officename, '.', '')) LIKE UPPER('%".str_replace(' ', '%', $officename)."%')
+                            )
+                            AND pincode = '$pincode' 
+                            LIMIT 1";
+                    
+                    $result = $conn->query($sql);
+                    if ($result && $result->num_rows > 0) {
+                        $details = $result->fetch_assoc();
+                        $details['url_statename'] = formatForUrl($details['statename']);
+                        $details['url_district'] = formatForUrl($details['district']);
+                        $details['url_officename'] = formatForUrl($details['officename']);
+                        $response['details'] = $details;
+                    } else {
+                        $response['error'] = "No records found for this URL";
+                    }
+                }
+                break;
+
+            case 'get_nearby_pincodes':
+                if (!isset($_POST['state']) || !isset($_POST['district'])) throw new Exception("Missing parameters");
                 $state = $conn->real_escape_string(trim($_POST['state']));
                 $district = $conn->real_escape_string(trim($_POST['district']));
-                
                 $sql = "SELECT officename, pincode, statename, district 
                         FROM pincodes 
                         WHERE UPPER(statename) = UPPER('$state') 
                         AND UPPER(district) = UPPER('$district')
                         ORDER BY officename";
-                
                 $result = $conn->query($sql);
                 if (!$result) throw new Exception("Failed to fetch nearby pincodes");
-                $response['nearby_pincodes'] = $result->fetch_all(MYSQLI_ASSOC);
+                $pincodes = $result->fetch_all(MYSQLI_ASSOC);
+                $response['nearby_pincodes'] = array_map(function($office) {
+                    return [
+                        'officename' => $office['officename'],
+                        'url_officename' => formatForUrl($office['officename']),
+                        'pincode' => $office['pincode'],
+                        'statename' => $office['statename'],
+                        'url_statename' => formatForUrl($office['statename']),
+                        'district' => $office['district'],
+                        'url_district' => formatForUrl($office['district'])
+                    ];
+                }, $pincodes);
                 break;
 
             default:
@@ -100,6 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode($response);
 
     } catch (Exception $e) {
+        error_log("Error: " . $e->getMessage());
         echo json_encode(['error' => $e->getMessage()]);
     } finally {
         if (isset($conn)) $conn->close();
@@ -107,6 +220,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 ?>
+
+<!-- Rest of your HTML remains the same -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -259,30 +374,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         // Initialize map variable
         let map;
         let marker;
-        
-        $(document).ready(function() {
-            // Get URL parameters
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlState = urlParams.get('state');
-            const urlDistrict = urlParams.get('district');
-            const urlOfficename = urlParams.get('officename');
 
-            // Load states and handle URL parameters
-            loadStates().then(() => {
-                if (urlState) {
-                    $('#state').val(urlState).trigger('change');
-                    if (urlDistrict) {
-                        loadDistricts(urlState).then(() => {
-                            $('#district').val(urlDistrict).trigger('change');
-                            if (urlOfficename) {
-                                loadOffices(urlState, urlDistrict).then(() => {
-                                    $('#officename').val(urlOfficename).trigger('change');
-                                });
-                            }
-                        });
-                    }
-                }
-            });
+        // Helper function to format name for URL
+        function formatForUrl(name) {
+            return name.toLowerCase().replace(/[\s+.\\/&;:%]+/g, '_').replace(/_+$/, '');
+        }
+
+        $(document).ready(function() {
+            // Check for URL parameters in new format
+            const query = window.location.search.substring(1); // Remove '?'
+            if (query) {
+                // Parse URL (e.g., jammu_and_kashmir-srinagar-gpo-190001)
+                parseUrl(query);
+            } else {
+                loadStates();
+            }
 
             $('#state').change(function() {
                 const state = $(this).val();
@@ -318,14 +424,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 const state = $('#state').val();
                 const district = $('#district').val();
                 const officename = $(this).val();
-                if (officename) {
+                if (pincodeMap[officename]) {
                     loadDetails(state, district, officename);
-                    updateUrl({ state, district, officename });
+                    updateUrl({ state, district, officename, pincode: pincodeMap[officename] });
                 } else {
                     resetResults();
                     updateUrl({ state, district });
                 }
             });
+
+            // Store pincode for each office to use in URL
+            let pincodeMap = {};
+
+            function parseUrl(url) {
+                showLoading(true);
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: { action: 'parse_url', url: url },
+                    dataType: 'json',
+                    success: function(response) {
+                        if (response.error) return showError(response.error);
+                        if (!response.details) return showError("No details found for this URL");
+                        
+                        // Load states, then set state and load districts
+                        loadStates().then(() => {
+                            $('#state').val(response.details.statename).trigger('change');
+                            loadDistricts(response.details.statename).then(() => {
+                                $('#district').val(response.details.district).trigger('change');
+                                loadOffices(response.details.statename, response.details.district).then(() => {
+                                    $('#officename').val(response.details.officename).trigger('change');
+                                });
+                            });
+                        });
+                    },
+                    error: function(xhr, status, error) {
+                        showError("Failed to parse URL: " + error);
+                    },
+                    complete: function() {
+                        showLoading(false);
+                    }
+                });
+            }
 
             function loadStates() {
                 showLoading(true);
@@ -338,7 +478,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         if (response.error) return showError(response.error);
                         const $stateSelect = $('#state').html('<option value="">Select State</option>');
                         response.states.forEach(state => {
-                            $stateSelect.append(`<option value="${state.statename}">${state.statename}</option>`);
+                            $stateSelect.append(`<option value="${state.statename}" data-url="${state.url_statename}">${state.statename}</option>`);
                         });
                     },
                     error: function(xhr, status, error) {
@@ -361,7 +501,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         if (response.error) return showError(response.error);
                         const $districtSelect = $('#district').html('<option value="">Select District</option>');
                         response.districts.forEach(district => {
-                            $districtSelect.append(`<option value="${district.district}">${district.district}</option>`);
+                            $districtSelect.append(`<option value="${district.district}" data-url="${district.url_district}">${district.district}</option>`);
                         });
                     },
                     error: function(xhr, status, error) {
@@ -383,11 +523,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     success: function(response) {
                         if (response.error) return showError(response.error);
                         const $officeSelect = $('#officename').html('<option value="">Select Office</option>');
+                        pincodeMap = {};
                         if (response.offices.length === 0) {
                             $officeSelect.append('<option value="" disabled>No offices found</option>');
                         } else {
                             response.offices.forEach(office => {
-                                $officeSelect.append(`<option value="${office.officename}">${office.officename}</option>`);
+                                $officeSelect.append(`<option value="${office.officename}" data-url="${office.url_officename}" data-pincode="${office.pincode}">${office.officename}</option>`);
+                                pincodeMap[office.officename] = office.pincode;
                             });
                         }
                     },
@@ -412,14 +554,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         if (!response.details) return showError("No details found for this office");
                         displayResults(response.details);
                         
-                        // Initialize or update map if coordinates exist
                         if (response.details.latitude && response.details.longitude) {
                             initMap(response.details.latitude, response.details.longitude, response.details.officename);
                         } else {
                             hideMap();
                         }
                         
-                        // Load nearby pincodes
                         loadNearbyPincodes(state, district);
                     },
                     error: function(xhr, status, error) {
@@ -448,9 +588,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         
                         if (response.nearby_pincodes && response.nearby_pincodes.length > 0) {
                             response.nearby_pincodes.forEach(office => {
+                                const url = `?${office.url_statename}-${office.url_district}-${office.url_officename}-${office.pincode}`;
                                 $tbody.append(`
                                     <tr>
-                                        <td><a href="?state=${encodeURIComponent(office.statename)}&district=${encodeURIComponent(office.district)}&officename=${encodeURIComponent(office.officename)}">${office.officename}</a></td>
+                                        <td><a href="${url}">${office.officename}</a></td>
                                         <td>${office.pincode || 'N/A'}</td>
                                         <td>${office.statename || 'N/A'}</td>
                                         <td>${office.district || 'N/A'}</td>
@@ -472,11 +613,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             function displayResults(details) {
-                // Format coordinates for display
                 const formattedLat = details.latitude ? parseFloat(details.latitude).toFixed(6) : 'N/A';
                 const formattedLng = details.longitude ? parseFloat(details.longitude).toFixed(6) : 'N/A';
                 
-                // Update page title and meta description for SEO
                 document.title = `Pincode ${details.pincode || ''} - ${details.district || ''}, ${details.statename || ''} | Postal Details`;
                 $('meta[name="description"]').attr('content', 
                     `Find detailed postal information for Pincode ${details.pincode || ''} in ${details.district || ''}, ${details.statename || ''}. Learn about postal services, geographical details, delivery options, and more.`);
@@ -504,10 +643,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                 </div>
                             </div>
 
-                            <!-- SEO Content Section -->
                             <section class="seo-section">
                                 <h1>Pincode <strong>${details.pincode || 'N/A'}</strong> - ${details.district || 'N/A'}, ${details.statename || 'N/A'} | Postal Details</h1>
-                                <br> <br>
+                                <br><br>
                                 <h2>The Pincode of ${details.officename || 'N/A'} is <strong>${details.pincode || 'N/A'}</strong></h2>
                                 <p>The pincode <strong>${details.pincode || 'N/A'}</strong> serves areas in <strong>${details.district || 'N/A'}</strong>, located in <strong>${details.statename || 'N/A'}</strong>. It is part of the <strong>${details.circlename || 'N/A'}</strong> postal circle, within the <strong>${details.regionname || 'N/A'}</strong> region, and managed by the <strong>${details.divisionname || 'N/A'}</strong> division. The pincode supports <strong>${details.delivery || 'N/A'}</strong> delivery services for fast mail and parcel delivery.</p>
                             </section>
@@ -559,27 +697,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
 
             function initMap(lat, lng, title) {
-                // Hide placeholder and show map
                 $('#map-placeholder').hide();
                 $('#map').show();
                 
                 if (!map) {
-                    // Initialize map if not already done
                     map = L.map('map').setView([lat, lng], 15);
                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     }).addTo(map);
                 } else {
-                    // Update existing map view
                     map.setView([lat, lng], 15);
                 }
                 
-                // Remove existing marker if any
                 if (marker) {
                     map.removeLayer(marker);
                 }
                 
-                // Add new marker
                 marker = L.marker([lat, lng]).addTo(map)
                     .bindPopup(title)
                     .openPopup();
@@ -599,7 +732,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $('#results').html('');
                 $('#nearby-pincodes').hide();
                 hideMap();
-                // Reset title and meta description
                 document.title = 'India Pincode Search with Map | Find Postal Codes';
                 $('meta[name="description"]').attr('content', 'Search Indian pincodes with detailed information including state, district, office details, and geographical coordinates');
             }
@@ -621,9 +753,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             function updateUrl(params) {
                 const url = new URL(window.location);
                 url.search = '';
-                if (params.state) url.searchParams.set('state', params.state);
-                if (params.district) url.searchParams.set('district', params.district);
-                if (params.officename) url.searchParams.set('officename', params.officename);
+                if (params.state && params.district && params.officename && params.pincode) {
+                    const stateUrl = $('#state option:selected').data('url') || formatForUrl(params.state);
+                    const districtUrl = $('#district option:selected').data('url') || formatForUrl(params.district);
+                    const officenameUrl = $('#officename option:selected').data('url') || formatForUrl(params.officename);
+                    url.search = `${stateUrl}-${districtUrl}-${officenameUrl}-${params.pincode}`;
+                } else if (params.state && params.district) {
+                    const stateUrl = $('#state option:selected').data('url') || formatForUrl(params.state);
+                    const districtUrl = $('#district option:selected').data('url') || formatForUrl(params.district);
+                    url.search = `${stateUrl}-${districtUrl}`;
+                } else if (params.state) {
+                    const stateUrl = $('#state option:selected').data('url') || formatForUrl(params.state);
+                    url.search = `${stateUrl}`;
+                }
                 window.history.pushState({}, '', url);
             }
         });
