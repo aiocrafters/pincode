@@ -261,7 +261,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         let marker;
         
         $(document).ready(function() {
-            loadStates();
+            // Get URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlState = urlParams.get('state');
+            const urlDistrict = urlParams.get('district');
+            const urlOfficename = urlParams.get('officename');
+
+            // Load states and handle URL parameters
+            loadStates().then(() => {
+                if (urlState) {
+                    $('#state').val(urlState).trigger('change');
+                    if (urlDistrict) {
+                        loadDistricts(urlState).then(() => {
+                            $('#district').val(urlDistrict).trigger('change');
+                            if (urlOfficename) {
+                                loadOffices(urlState, urlDistrict).then(() => {
+                                    $('#officename').val(urlOfficename).trigger('change');
+                                });
+                            }
+                        });
+                    }
+                }
+            });
 
             $('#state').change(function() {
                 const state = $(this).val();
@@ -270,9 +291,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $('#district').prop('disabled', false).html('<option value="">Loading...</option>');
                     $('#officename').prop('disabled', true).html('<option value="">Select Office</option>');
                     resetResults();
+                    updateUrl({ state });
                 } else {
                     $('#district, #officename').prop('disabled', true).html('<option value="">Select...</option>');
                     resetResults();
+                    updateUrl({});
                 }
             });
 
@@ -283,9 +306,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     loadOffices(state, district);
                     $('#officename').prop('disabled', false).html('<option value="">Loading...</option>');
                     resetResults();
+                    updateUrl({ state, district });
                 } else {
                     $('#officename').prop('disabled', true).html('<option value="">Select Office</option>');
                     resetResults();
+                    updateUrl({ state });
                 }
             });
 
@@ -295,14 +320,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 const officename = $(this).val();
                 if (officename) {
                     loadDetails(state, district, officename);
+                    updateUrl({ state, district, officename });
                 } else {
                     resetResults();
+                    updateUrl({ state, district });
                 }
             });
 
             function loadStates() {
                 showLoading(true);
-                $.ajax({
+                return $.ajax({
                     url: window.location.href,
                     type: 'POST',
                     data: { action: 'get_states' },
@@ -325,7 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             function loadDistricts(state) {
                 showLoading(true);
-                $.ajax({
+                return $.ajax({
                     url: window.location.href,
                     type: 'POST',
                     data: { action: 'get_districts', state: state },
@@ -348,7 +375,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             function loadOffices(state, district) {
                 showLoading(true);
-                $.ajax({
+                return $.ajax({
                     url: window.location.href,
                     type: 'POST',
                     data: { action: 'get_offices', state: state, district: district },
@@ -423,7 +450,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             response.nearby_pincodes.forEach(office => {
                                 $tbody.append(`
                                     <tr>
-                                        <td>${office.officename}</td>
+                                        <td><a href="?state=${encodeURIComponent(office.statename)}&district=${encodeURIComponent(office.district)}&officename=${encodeURIComponent(office.officename)}">${office.officename}</a></td>
                                         <td>${office.pincode || 'N/A'}</td>
                                         <td>${office.statename || 'N/A'}</td>
                                         <td>${office.district || 'N/A'}</td>
@@ -559,7 +586,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             function hideMap() {
-                $('#map'). Dioxide();
+                $('#map').hide();
                 $('#map-placeholder').show();
                 if (map) {
                     map.off();
@@ -589,6 +616,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 `);
                 hideMap();
                 $('#nearby-pincodes').hide();
+            }
+
+            function updateUrl(params) {
+                const url = new URL(window.location);
+                url.search = '';
+                if (params.state) url.searchParams.set('state', params.state);
+                if (params.district) url.searchParams.set('district', params.district);
+                if (params.officename) url.searchParams.set('officename', params.officename);
+                window.history.pushState({}, '', url);
             }
         });
     </script>
