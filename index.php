@@ -172,14 +172,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             border-top: 1px solid #eee;
             padding-top: 20px;
         }
-        .office-link {
-            color: #0d6efd;
-            text-decoration: none;
-            font-weight: 500;
-        }
-        .office-link:hover {
-            text-decoration: underline;
-        }
         .table-responsive {
             max-height: 400px;
             overflow-y: auto;
@@ -431,14 +423,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             response.nearby_pincodes.forEach(office => {
                                 $tbody.append(`
                                     <tr>
-                                        <td>
-                                            <a href="javascript:void(0)" class="office-link" 
-                                               data-state="${office.statename}" 
-                                               data-district="${office.district}" 
-                                               data-office="${office.officename}">
-                                                ${office.officename}
-                                            </a>
-                                        </td>
+                                        <td>${office.officename}</td>
                                         <td>${office.pincode || 'N/A'}</td>
                                         <td>${office.statename || 'N/A'}</td>
                                         <td>${office.district || 'N/A'}</td>
@@ -555,7 +540,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     // Initialize map if not already done
                     map = L.map('map').setView([lat, lng], 15);
                     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     }).addTo(map);
                 } else {
                     // Update existing map view
@@ -574,7 +559,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             function hideMap() {
-                $('#map').hide();
+                $('#map'). Dioxide();
                 $('#map-placeholder').show();
                 if (map) {
                     map.off();
@@ -605,26 +590,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 hideMap();
                 $('#nearby-pincodes').hide();
             }
-        });
-
-        // Event delegation for clickable office names
-        $(document).on('click', '.office-link', function() {
-            const state = $(this).data('state');
-            const district = $(this).data('district');
-            const office = $(this).data('office');
-            
-            // Set the dropdown values
-            $('#state').val(state);
-            $('#district').val(district);
-            $('#officename').val(office);
-            
-            // Trigger the change event to load details
-            loadDetails(state, district, office);
-            
-            // Scroll to results section
-            $('html, body').animate({
-                scrollTop: $('#results').offset().top - 20
-            }, 500);
         });
     </script>
 </body>

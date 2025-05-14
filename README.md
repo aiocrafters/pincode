@@ -40,20 +40,27 @@ USE india_pincode;
 Create the table to store pincode data:
 
 ```sql
+-- Create the database
+CREATE DATABASE IF NOT EXISTS india_pincode;
+
+-- Use the created database
+USE india_pincode;
+
+-- Create the pincodes table
 CREATE TABLE IF NOT EXISTS pincodes (
-    serial INT AUTO_INCREMENT PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     circlename VARCHAR(100),
     regionname VARCHAR(100),
     divisionname VARCHAR(100),
-    officename VARCHAR(150),
-    pincode VARCHAR(10),
+    officename VARCHAR(100),
+    pincode INT,
     officetype VARCHAR(50),
-    delivery VARCHAR(10),
+    delivery VARCHAR(50),
     district VARCHAR(100),
     statename VARCHAR(100),
-    latitude DECIMAL(10, 6),
-    longitude DECIMAL(10, 6)
-);
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
 ---
